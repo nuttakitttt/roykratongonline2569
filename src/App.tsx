@@ -92,10 +92,19 @@ const STORAGE_KEYS = {
   GAS_URL: 'wice_loykrathong_2569_gas_url_v1',
 };
 
+// หมายเหตุสำคัญสำหรับผู้ดูแลระบบ:
+// หากต้องการให้ผู้ใช้งานจากทุกเครื่องบันทึกลง Google Sheet ได้ทันทีโดยไม่ต้องส่งลิงก์พ่วง ?gas=...
+// ให้วาง Web App URL (/exec) ลงในตัวแปร VITE_GAS_WEBAPP_URL หรือใส่แทนค่าว่างด้านล่างแล้ว Build ใหม่
 const DEFAULT_GAS_URL =
   (typeof import.meta !== 'undefined' &&
     (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_GAS_WEBAPP_URL) ||
   '';
+
+function isValidGasWebAppUrl(url: string): boolean {
+  return /^https:\/\/script\.google\.com\/(?:a\/macros\/[^/]+\/)?macros\/s\/.+\/(exec|dev)(?:[?#].*)?$/i.test(
+    url.trim()
+  );
+}
 
 const PEN_COLORS = [
   '#2E7D32',
@@ -166,18 +175,39 @@ const GOOGLE_APPS_SCRIPT_CODE = `/**
  * Google Apps Script Backend สำหรับระบบ "ลอยกระทงออนไลน์ 2569"
  * วิทยาลัยการอาชีพเวียงเชียงรุ้ง
  *
- * วิธีติดตั้ง:
- * 1. เปิด Google Sheets สร้างสเปรดชีตใหม่ แล้วไปที่ Extensions > Apps Script
- * 2. วางโค้ดนี้ลงในไฟล์ Code.gs ทั้งหมดแล้วกด Save
- * 3. กด Deploy > New deployment > เลือก Type: Web app
- *    - Execute as: Me
- *    - Who has access: Anyone
- * 4. คัดลอก Web app URL มาวางในหน้าตั้งค่าการเชื่อมต่อของเว็บลอยกระทง
+ * วิธีติดตั้งและแก้ไขปัญหาเครื่องอื่นบันทึกไม่ได้:
+ * 1. เปิด Google Sheets ที่ต้องการเก็บข้อมูล แล้วไปที่ Extensions > Apps Script
+ * 2. วางโค้ดนี้ลงในไฟล์ Code.gs ทั้งหมดแล้วกด Save (Ctrl+S)
+ * 3. กด Deploy > New deployment (หรือ Manage deployments > Edit > Version: New version)
+ *    - Type: Web app
+ *    - Execute as: Me (บัญชีเจ้าของสคริปต์)
+ *    - Who has access: Anyone (ทุกคน — ห้ามเลือก Only myself หรือ Anyone within organization)
+ * 4. คัดลอก Web app URL (.../exec) มาวางในหน้าตั้งค่า (?setup=sheet) ของเว็บลอยกระทง
  */
 
 const SHEET_NAME = 'Krathongs';
 // หากสร้างสคริปต์แยกไม่ได้สร้างจาก Google Sheet โดยตรง ให้ใส่ Spreadsheet ID ลงในเครื่องหมายคำพูดด้านล่าง
 const SPREADSHEET_ID = '';
+
+const HEADERS = [
+  'id',
+  'userCode',
+  'name',
+  'ownerName',
+  'wish',
+  'imageData',
+  'baseType',
+  'signStyle',
+  'signColor',
+  'signX',
+  'signY',
+  'nameSize',
+  'wishSize',
+  'isContest',
+  'beautifulVotes',
+  'funnyVotes',
+  'createdAt'
+];
 
 function getOrCreateSheet() {
   const ss = SPREADSHEET_ID
@@ -189,26 +219,11 @@ function getOrCreateSheet() {
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
-    sheet.appendRow([
-      'id',
-      'userCode',
-      'name',
-      'ownerName',
-      'wish',
-      'imageData',
-      'baseType',
-      'signStyle',
-      'signColor',
-      'signX',
-      'signY',
-      'nameSize',
-      'wishSize',
-      'isContest',
-      'beautifulVotes',
-      'funnyVotes',
-      'createdAt'
-    ]);
+  }
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS);
     sheet.setFrozenRows(1);
+    SpreadsheetApp.flush();
   }
   return sheet;
 }
@@ -217,11 +232,34 @@ function doGet(e) {
   try {
     const sheet = getOrCreateSheet();
     const values = sheet.getDataRange().getValues();
+    const params = (e && e.parameter) || {};
+
+    if (params.action === 'ping') {
+      return jsonResponse({
+        ok: true,
+        sheetName: sheet.getName(),
+        spreadsheetName: sheet.getParent().getName(),
+        total: Math.max(0, values.length - 1)
+      });
+    }
+
+    if (params.checkId) {
+      const targetId = String(params.checkId).trim();
+      let exists = false;
+      for (let i = 1; i < values.length; i++) {
+        if (String(values[i][0]) === targetId) {
+          exists = true;
+          break;
+        }
+      }
+      return jsonResponse({ ok: true, exists, total: Math.max(0, values.length - 1) });
+    }
+
     if (values.length <= 1) {
       return jsonResponse({ ok: true, items: [], total: 0 });
     }
     const headers = values[0];
-    const userCodeFilter = e && e.parameter && e.parameter.userCode ? String(e.parameter.userCode).trim().toUpperCase() : '';
+    const userCodeFilter = params.userCode ? String(params.userCode).trim().toUpperCase() : '';
     const items = [];
     for (let i = 1; i < values.length; i++) {
       const row = values[i];
@@ -245,15 +283,21 @@ function doGet(e) {
     items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     return jsonResponse({ ok: true, items: items.slice(0, 200), total: values.length - 1 });
   } catch (err) {
-    return jsonResponse({ ok: false, error: err.message });
+    return jsonResponse({ ok: false, error: err && err.message ? err.message : String(err) });
   }
 }
 
 function doPost(e) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(10000);
+  const hasLock = lock.tryLock(15000);
+  if (!hasLock) {
+    return jsonResponse({ ok: false, error: 'ระบบกำลังบันทึกข้อมูลจำนวนมาก กรุณาลองใหม่อีกครั้ง' });
+  }
   try {
-    const rawBody = (e && e.postData && e.postData.contents) || (e && e.parameter && e.parameter.payload) || '';
+    const rawBody =
+      (e && e.postData && e.postData.contents) ||
+      (e && e.parameter && e.parameter.payload) ||
+      '';
     if (!rawBody) {
       return jsonResponse({ ok: false, error: 'Missing request body' });
     }
@@ -262,6 +306,21 @@ function doPost(e) {
 
     if (payload.action === 'create') {
       const k = payload.krathong || {};
+      const itemId = String(k.id || '').trim();
+      if (!itemId) {
+        return jsonResponse({ ok: false, error: 'Missing krathong id' });
+      }
+      // ป้องกันการบันทึกซ้ำเมื่อมีการส่งซ้ำหรือ fallback
+      const lastRow = sheet.getLastRow();
+      if (lastRow > 1) {
+        const existingIds = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        for (let i = 0; i < existingIds.length; i++) {
+          if (String(existingIds[i][0]) === itemId) {
+            return jsonResponse({ ok: true, id: itemId, duplicate: true });
+          }
+        }
+      }
+
       const safeImageData = String(k.imageData || '');
       if (safeImageData.length > 49500) {
         return jsonResponse({
@@ -270,7 +329,7 @@ function doPost(e) {
         });
       }
       sheet.appendRow([
-        String(k.id || ''),
+        itemId,
         String(k.userCode || ''),
         String(k.name || ''),
         String(k.ownerName || ''),
@@ -288,7 +347,8 @@ function doPost(e) {
         Number(k.funnyVotes || 0),
         k.createdAt || new Date().toISOString()
       ]);
-      return jsonResponse({ ok: true, id: k.id });
+      SpreadsheetApp.flush();
+      return jsonResponse({ ok: true, id: itemId });
     }
 
     if (payload.action === 'vote') {
@@ -305,6 +365,7 @@ function doPost(e) {
           const current = Number(data[i][colIndex - 1] || 0);
           const next = Math.max(0, current + delta);
           sheet.getRange(i + 1, colIndex).setValue(next);
+          SpreadsheetApp.flush();
           return jsonResponse({ ok: true, id, voteType, count: next });
         }
       }
@@ -313,9 +374,9 @@ function doPost(e) {
 
     return jsonResponse({ ok: false, error: 'Unknown action' });
   } catch (err) {
-    return jsonResponse({ ok: false, error: err.message });
+    return jsonResponse({ ok: false, error: err && err.message ? err.message : String(err) });
   } finally {
-    lock.releaseLock();
+    if (hasLock) lock.releaseLock();
   }
 }
 
@@ -334,6 +395,8 @@ function exportCompactKrathongDataUrl(sourceCanvas: HTMLCanvasElement): string {
     { size: 180, mime: 'image/webp', quality: 0.62 },
     { size: 160, mime: 'image/png' },
     { size: 120, mime: 'image/png' },
+    { size: 96, mime: 'image/png' },
+    { size: 76, mime: 'image/png' },
   ];
 
   const offscreen = document.createElement('canvas');
@@ -353,7 +416,14 @@ function exportCompactKrathongDataUrl(sourceCanvas: HTMLCanvasElement): string {
       return url;
     }
   }
-  return offscreen.toDataURL('image/png');
+
+  // Final safety fallback on iOS/older Safari if PNG remains > 44,000 chars
+  offscreen.width = 160;
+  offscreen.height = 160;
+  ctx.fillStyle = '#0E2347';
+  ctx.fillRect(0, 0, 160, 160);
+  ctx.drawImage(sourceCanvas, 0, 0, 160, 160);
+  return offscreen.toDataURL('image/jpeg', 0.78);
 }
 
 // ============================================================================
@@ -1399,6 +1469,14 @@ export default function App() {
 
   const [gasUrl, setGasUrl] = useState<string>(() => {
     try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const paramUrl = (params.get('gas') || params.get('sheet') || '').trim();
+        if (paramUrl && isValidGasWebAppUrl(paramUrl)) {
+          localStorage.setItem(STORAGE_KEYS.GAS_URL, paramUrl);
+          return paramUrl;
+        }
+      }
       return localStorage.getItem(STORAGE_KEYS.GAS_URL) || DEFAULT_GAS_URL;
     } catch {
       return DEFAULT_GAS_URL;
@@ -1544,9 +1622,9 @@ export default function App() {
         return;
       }
 
-      if (!/^https:\/\/script\.google\.com\/macros\/s\/.+\/(exec|dev)/.test(cleanUrl)) {
+      if (!isValidGasWebAppUrl(cleanUrl)) {
         const msg =
-          'รูปแบบ URL ไม่ถูกต้อง ลิงก์ Web App ควรขึ้นต้นด้วย https://script.google.com/macros/s/.../exec';
+          'รูปแบบ URL ไม่ถูกต้อง ลิงก์ Web App ควรลงท้ายด้วย /exec เช่น https://script.google.com/macros/s/.../exec';
         setGasStatus({ type: 'error', text: msg });
         if (!silent) showToast(msg);
         return;
@@ -1601,8 +1679,8 @@ export default function App() {
       } catch (err) {
         const isNotJson = err instanceof Error && err.message === 'NOT_JSON';
         const msg = isNotJson
-          ? 'เชื่อมต่อได้แต่ไม่ได้รับข้อมูล JSON — กรุณาตั้งค่า Deploy > Who has access เป็น "Anyone" (ทุกคน)'
-          : 'ไม่สามารถเชื่อมต่อ Apps Script URL นี้ได้ กรุณาตรวจสอบอินเทอร์เน็ตและสิทธิ์ "Anyone" ในการ Deploy';
+          ? 'เชื่อมต่อได้แต่ไม่ได้รับข้อมูล JSON — กรุณาตั้งค่า Deploy > Who has access เป็น "Anyone" (ทุกคน) ไม่ใช่เฉพาะภายในองค์กร'
+          : 'ไม่สามารถเชื่อมต่อ Apps Script URL นี้ได้ กรุณาตรวจสอบว่าตั้งค่า Who has access เป็น "Anyone" (ทุกคน) และคัดลอกลิงก์ /exec ล่าสุด';
         setGasStatus({ type: 'error', text: msg });
         if (!silent) showToast(msg);
       } finally {
@@ -1612,7 +1690,7 @@ export default function App() {
     [showToast]
   );
 
-  // POST helper to Google Apps Script with verified response + no-cors fallback
+  // POST helper to Google Apps Script with verified response + no-cors + GET verification
   const postToGas = useCallback(
     async (
       targetUrl: string,
@@ -1642,11 +1720,11 @@ export default function App() {
           return {
             ok: false,
             error:
-              'ไม่ได้รับผลลัพธ์ JSON จาก Apps Script (โปรดตรวจสอบว่า Deploy สิทธิ์เป็น Anyone และใช้ลิงก์ /exec ล่าสุด)',
+              'ไม่ได้รับผลลัพธ์ JSON จาก Apps Script (โปรดตรวจสอบว่า Deploy สิทธิ์ Who has access เป็น "Anyone" ทุกคน และใช้ลิงก์ /exec ล่าสุด)',
           };
         }
       } catch {
-        // Fallback when browser blocks reading redirected response from script.googleusercontent.com
+        // Fallback when browser blocks reading redirected POST response from script.googleusercontent.com
         try {
           await fetch(cleanUrl, {
             method: 'POST',
@@ -1654,6 +1732,42 @@ export default function App() {
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: bodyStr,
           });
+
+          // If creating a krathong, verify persistence via GET ?checkId=
+          const createdId =
+            payload.action === 'create' &&
+            payload.krathong &&
+            typeof (payload.krathong as { id?: string }).id === 'string'
+              ? (payload.krathong as { id: string }).id
+              : '';
+
+          if (createdId) {
+            await new Promise((r) => setTimeout(r, 750));
+            const sep = cleanUrl.includes('?') ? '&' : '?';
+            try {
+              const checkRes = await fetch(
+                `${cleanUrl}${sep}checkId=${encodeURIComponent(createdId)}`,
+                { method: 'GET', redirect: 'follow', cache: 'no-store' }
+              );
+              const checkText = await checkRes.text();
+              const checkData = JSON.parse(checkText);
+              if (checkData && checkData.ok && checkData.exists === true) {
+                return { ok: true };
+              }
+              return {
+                ok: false,
+                error:
+                  'ส่งข้อมูลแล้วแต่ยังไม่พบแถวใหม่ใน Google Sheet (กรุณาอัปเดต Code.gs และ Deploy > Manage deployments > New version พร้อมตั้งค่า Who has access เป็น Anyone)',
+              };
+            } catch {
+              return {
+                ok: false,
+                error:
+                  'เครื่องนี้เข้าถึง Apps Script ไม่ได้ — กรุณาตรวจสอบว่า Deploy > Who has access ตั้งเป็น "Anyone (ทุกคน)" ไม่ใช่เฉพาะบัญชีองค์กร',
+              };
+            }
+          }
+
           return { ok: true, opaque: true };
         } catch {
           return {
@@ -1666,7 +1780,7 @@ export default function App() {
     []
   );
 
-  // Sync once on initial mount + listen for Ctrl+Shift+G to open Google Sheet modal
+  // Sync once on initial mount, periodic background sync every 25s, + Ctrl+Shift+G modal shortcut
   const didInitialMountSyncRef = useRef(false);
   useEffect(() => {
     if (didInitialMountSyncRef.current) return;
@@ -1680,6 +1794,14 @@ export default function App() {
     if (gasUrl) {
       fetchFromGas(gasUrl, true);
     }
+  }, [gasUrl, fetchFromGas]);
+
+  useEffect(() => {
+    if (!gasUrl.trim()) return;
+    const interval = setInterval(() => {
+      fetchFromGas(gasUrl, true);
+    }, 25000);
+    return () => clearInterval(interval);
   }, [gasUrl, fetchFromGas]);
 
   useEffect(() => {
@@ -2064,7 +2186,12 @@ export default function App() {
   };
 
   const handleShareInvite = async () => {
-    const shareUrl = window.location.href;
+    const urlObj = new URL(window.location.href);
+    urlObj.searchParams.delete('setup');
+    if (gasUrl.trim() && gasUrl.trim() !== DEFAULT_GAS_URL) {
+      urlObj.searchParams.set('gas', gasUrl.trim());
+    }
+    const shareUrl = urlObj.toString();
     const shareText =
       'มาร่วมลอยกระทงออนไลน์ 2569 กับวิทยาลัยการอาชีพเวียงเชียงรุ้ง วาดกระทงและปล่อยลงสายน้ำพร้อมกัน!';
     try {
@@ -3702,10 +3829,40 @@ export default function App() {
                 </div>
               )}
 
+              {/* Cross-Device Distribution Notice + Shareable Link */}
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-400/30 text-[11.5px] text-amber-100 space-y-2 leading-relaxed">
+                <div>
+                  <span className="font-semibold text-amber-200">สำคัญสำหรับการใช้งานจากเครื่องอื่น:</span>{' '}
+                  {DEFAULT_GAS_URL
+                    ? 'ระบบฝังค่าลิงก์ Google Sheet เริ่มต้นไว้ในเว็บแล้ว ทุกเครื่องที่เปิดเว็บจะบันทึกข้อมูลตรงเข้าชีตอัตโนมัติ'
+                    : 'ค่า URL ในช่องด้านบนจะเก็บเฉพาะในเบราว์เซอร์เครื่องนี้เท่านั้น หากให้เครื่องอื่นเปิดเว็บจากลิงก์ปกติโดยไม่มี ?gas=... เครื่องอื่นจะยังไม่รู้จักลิงก์ชีต'}
+                </div>
+                {gasInputUrl.trim() && isValidGasWebAppUrl(gasInputUrl.trim()) && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const u = new URL(window.location.href);
+                      u.searchParams.delete('setup');
+                      u.searchParams.set('gas', gasInputUrl.trim());
+                      try {
+                        await navigator.clipboard.writeText(u.toString());
+                        showToast('คัดลอกลิงก์สำหรับแจกให้เครื่องอื่นแล้ว (ผูก Google Sheet อัตโนมัติ)');
+                      } catch {
+                        showToast('ไม่สามารถคัดลอกอัตโนมัติได้');
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400/20 hover:bg-amber-400/30 border border-amber-400/40 text-[11px] font-medium text-amber-100 inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>คัดลอกลิงก์เว็บพร้อมผูก Google Sheet ให้เครื่องอื่น</span>
+                  </button>
+                )}
+              </div>
+
               {/* Quick Reset Local Data & Live Write Test */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <span className="text-[11px] text-slate-400">
-                  ขั้นตอน: สร้าง Google Sheet → Extensions → Apps Script → วาง Code.gs → Deploy (Anyone)
+                  ขั้นตอน: Extensions → Apps Script → วาง Code.gs → Deploy (Execute as: Me / Access: Anyone)
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -3714,10 +3871,17 @@ export default function App() {
                     onClick={async () => {
                       const target = gasInputUrl.trim();
                       if (!target) return;
+                      if (!isValidGasWebAppUrl(target)) {
+                        setGasStatus({
+                          type: 'error',
+                          text: 'รูปแบบ Web App URL ไม่ถูกต้อง (ต้องลงท้ายด้วย /exec)',
+                        });
+                        return;
+                      }
                       setIsSyncingGas(true);
                       setGasStatus({
                         type: 'info',
-                        text: 'กำลังทดสอบเขียนข้อมูลตัวอย่างลง Google Sheet...',
+                        text: 'กำลังทดสอบอ่าน-เขียน (GET + POST) กับ Google Sheet...',
                       });
                       const sample = createSeedKrathongs()[0];
                       const testItem: KrathongItem = {
@@ -3735,7 +3899,7 @@ export default function App() {
                       if (res.ok && !res.opaque) {
                         setGasStatus({
                           type: 'success',
-                          text: 'ทดสอบบันทึกข้อมูล (POST) ลง Google Sheet สำเร็จ! สามารถเปิดดูแถวใหม่ในชีต "Krathongs" ได้เลย',
+                          text: 'ทดสอบบันทึกข้อมูล (POST + ยืนยันแถวใหม่) ลง Google Sheet สำเร็จ! ตรวจสอบแถวใหม่ในชีต "Krathongs" ได้เลย',
                         });
                         showToast('ทดสอบบันทึกข้อมูลลง Google Sheet สำเร็จ');
                       } else if (res.ok && res.opaque) {
