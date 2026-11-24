@@ -176,9 +176,16 @@ const GOOGLE_APPS_SCRIPT_CODE = `/**
  */
 
 const SHEET_NAME = 'Krathongs';
+// หากสร้างสคริปต์แยกไม่ได้สร้างจาก Google Sheet โดยตรง ให้ใส่ Spreadsheet ID ลงในเครื่องหมายคำพูดด้านล่าง
+const SPREADSHEET_ID = '';
 
 function getOrCreateSheet() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SPREADSHEET_ID
+    ? SpreadsheetApp.openById(SPREADSHEET_ID)
+    : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('ไม่พบ Spreadsheet กรุณาสร้างสคริปต์ผ่านเมนู Extensions > Apps Script ใน Google Sheet หรือระบุ SPREADSHEET_ID');
+  }
   let sheet = ss.getSheetByName(SHEET_NAME);
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_NAME);
@@ -246,28 +253,36 @@ function doPost(e) {
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
-    if (!e || !e.postData || !e.postData.contents) {
+    const rawBody = (e && e.postData && e.postData.contents) || (e && e.parameter && e.parameter.payload) || '';
+    if (!rawBody) {
       return jsonResponse({ ok: false, error: 'Missing request body' });
     }
-    const payload = JSON.parse(e.postData.contents);
+    const payload = JSON.parse(rawBody);
     const sheet = getOrCreateSheet();
 
     if (payload.action === 'create') {
-      const k = payload.krathong;
+      const k = payload.krathong || {};
+      const safeImageData = String(k.imageData || '');
+      if (safeImageData.length > 49500) {
+        return jsonResponse({
+          ok: false,
+          error: 'ขนาดภาพกระทงเกินขีดจำกัด 50,000 ตัวอักษรของเซลล์ Google Sheets (' + safeImageData.length + ')'
+        });
+      }
       sheet.appendRow([
-        k.id,
-        k.userCode,
-        k.name,
-        k.ownerName,
-        k.wish,
-        k.imageData,
-        k.baseType,
-        k.signStyle,
-        k.signColor,
-        k.signX,
-        k.signY,
-        k.nameSize,
-        k.wishSize,
+        String(k.id || ''),
+        String(k.userCode || ''),
+        String(k.name || ''),
+        String(k.ownerName || ''),
+        String(k.wish || ''),
+        safeImageData,
+        String(k.baseType || 'none'),
+        String(k.signStyle || 'none'),
+        String(k.signColor || '#A46A3E'),
+        Number(k.signX || 50),
+        Number(k.signY || 28),
+        String(k.nameSize || 'md'),
+        String(k.wishSize || 'md'),
         Boolean(k.isContest),
         Number(k.beautifulVotes || 0),
         Number(k.funnyVotes || 0),
@@ -277,13 +292,16 @@ function doPost(e) {
     }
 
     if (payload.action === 'vote') {
-      const id = String(payload.id);
+      const id = String(payload.id || '');
       const voteType = payload.voteType; // 'beautiful' | 'funny'
       const delta = Number(payload.delta || 1);
       const data = sheet.getDataRange().getValues();
+      const headers = data[0] || [];
+      const bCol = headers.indexOf('beautifulVotes') >= 0 ? headers.indexOf('beautifulVotes') + 1 : 15;
+      const fCol = headers.indexOf('funnyVotes') >= 0 ? headers.indexOf('funnyVotes') + 1 : 16;
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0]) === id) {
-          const colIndex = voteType === 'funny' ? 16 : 15; // 1-based column
+          const colIndex = voteType === 'funny' ? fCol : bCol;
           const current = Number(data[i][colIndex - 1] || 0);
           const next = Math.max(0, current + delta);
           sheet.getRange(i + 1, colIndex).setValue(next);
@@ -307,6 +325,36 @@ function jsonResponse(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 `;
+
+// Compress Krathong canvas image strictly under Google Sheets 50,000 char cell limit
+function exportCompactKrathongDataUrl(sourceCanvas: HTMLCanvasElement): string {
+  const attempts: { size: number; mime: string; quality?: number }[] = [
+    { size: 260, mime: 'image/webp', quality: 0.82 },
+    { size: 220, mime: 'image/webp', quality: 0.72 },
+    { size: 180, mime: 'image/webp', quality: 0.62 },
+    { size: 160, mime: 'image/png' },
+    { size: 120, mime: 'image/png' },
+  ];
+
+  const offscreen = document.createElement('canvas');
+  const ctx = offscreen.getContext('2d');
+  if (!ctx) return sourceCanvas.toDataURL('image/png');
+
+  for (const step of attempts) {
+    offscreen.width = step.size;
+    offscreen.height = step.size;
+    ctx.clearRect(0, 0, step.size, step.size);
+    ctx.drawImage(sourceCanvas, 0, 0, step.size, step.size);
+    const url =
+      step.quality !== undefined
+        ? offscreen.toDataURL(step.mime, step.quality)
+        : offscreen.toDataURL(step.mime);
+    if (url.length <= 44000) {
+      return url;
+    }
+  }
+  return offscreen.toDataURL('image/png');
+}
 
 // ============================================================================
 // PROCEDURAL KRATHONG BASE & STAMP RENDERER (HTML5 CANVAS)
@@ -1564,7 +1612,61 @@ export default function App() {
     [showToast]
   );
 
-  // Sync once on initial mount if a Google Apps Script URL is already configured
+  // POST helper to Google Apps Script with verified response + no-cors fallback
+  const postToGas = useCallback(
+    async (
+      targetUrl: string,
+      payload: Record<string, unknown>
+    ): Promise<{ ok: boolean; opaque?: boolean; error?: string }> => {
+      const cleanUrl = targetUrl.trim();
+      if (!cleanUrl) return { ok: false, error: 'ยังไม่ได้ตั้งค่า Web App URL' };
+      const bodyStr = JSON.stringify(payload);
+      try {
+        const res = await fetch(cleanUrl, {
+          method: 'POST',
+          redirect: 'follow',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: bodyStr,
+        });
+        const text = await res.text();
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && parsed.ok) {
+            return { ok: true };
+          }
+          return {
+            ok: false,
+            error: parsed?.error || 'Apps Script ปฏิเสธการบันทึกข้อมูล',
+          };
+        } catch {
+          return {
+            ok: false,
+            error:
+              'ไม่ได้รับผลลัพธ์ JSON จาก Apps Script (โปรดตรวจสอบว่า Deploy สิทธิ์เป็น Anyone และใช้ลิงก์ /exec ล่าสุด)',
+          };
+        }
+      } catch {
+        // Fallback when browser blocks reading redirected response from script.googleusercontent.com
+        try {
+          await fetch(cleanUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: bodyStr,
+          });
+          return { ok: true, opaque: true };
+        } catch {
+          return {
+            ok: false,
+            error: 'เชื่อมต่อ Google Apps Script ไม่สำเร็จ (Network/CORS error)',
+          };
+        }
+      }
+    },
+    []
+  );
+
+  // Sync once on initial mount + listen for Ctrl+Shift+G to open Google Sheet modal
   const didInitialMountSyncRef = useRef(false);
   useEffect(() => {
     if (didInitialMountSyncRef.current) return;
@@ -1579,6 +1681,19 @@ export default function App() {
       fetchFromGas(gasUrl, true);
     }
   }, [gasUrl, fetchFromGas]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        setGasInputUrl(gasUrl);
+        setGasStatus(null);
+        setActiveModal('gas');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [gasUrl]);
 
   // Initialize & sync Floating River items (left to right movement)
   useEffect(() => {
@@ -1814,7 +1929,7 @@ export default function App() {
 
     const canvas = drawCanvasRef.current;
     if (!canvas) return;
-    const imageData = canvas.toDataURL('image/png');
+    const imageData = exportCompactKrathongDataUrl(canvas);
 
     let activeCode = userCode;
     if (!activeCode) {
@@ -1851,15 +1966,13 @@ export default function App() {
     setKrathongs((prev) => [newItem, ...prev]);
 
     // Sync to Google Apps Script Web App if configured
+    let sheetSyncNote = '';
     if (gasUrl.trim()) {
-      try {
-        await fetch(gasUrl.trim(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'create', krathong: newItem }),
-        });
-      } catch {
-        // Already saved locally; user remains unblocked
+      const result = await postToGas(gasUrl, { action: 'create', krathong: newItem });
+      if (!result.ok) {
+        sheetSyncNote = ` (หมายเหตุ: บันทึกลง Google Sheet ไม่สำเร็จ: ${result.error})`;
+      } else if (!result.opaque) {
+        sheetSyncNote = ' และบันทึกลง Google Sheet แล้ว';
       }
     }
 
@@ -1867,7 +1980,7 @@ export default function App() {
     setActiveModal('none');
     setKrathongName('');
     setWishText('');
-    showToast(`ปล่อยกระทงลงสายน้ำแล้ว! รหัสกระทงของคุณคือ ${activeCode}`);
+    showToast(`ปล่อยกระทงลงสายน้ำแล้ว${sheetSyncNote}! รหัสกระทงของคุณคือ ${activeCode}`);
   };
 
   const handleVote = async (item: KrathongItem, voteType: 'beautiful' | 'funny') => {
@@ -1911,14 +2024,14 @@ export default function App() {
     }
 
     if (gasUrl.trim()) {
-      try {
-        await fetch(gasUrl.trim(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'vote', id: item.id, voteType, delta }),
-        });
-      } catch {
-        // Optimistic update preserved
+      const result = await postToGas(gasUrl, {
+        action: 'vote',
+        id: item.id,
+        voteType,
+        delta,
+      });
+      if (!result.ok && result.error) {
+        showToast(`อัปเดตผลโหวตลง Google Sheet ไม่สำเร็จ: ${result.error}`);
       }
     }
   };
@@ -3584,33 +3697,82 @@ export default function App() {
                 </div>
               )}
 
-              {/* Quick Reset Local Data to 1 Sample Krathong */}
+              {/* Quick Reset Local Data & Live Write Test */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                 <span className="text-[11px] text-slate-400">
                   ขั้นตอน: สร้าง Google Sheet → Extensions → Apps Script → วาง Code.gs → Deploy (Anyone)
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const fresh = createSeedKrathongs();
-                    setKrathongs(fresh);
-                    setVotedMap({});
-                    try {
-                      localStorage.setItem(STORAGE_KEYS.KRATHONGS, JSON.stringify(fresh));
-                      localStorage.removeItem(STORAGE_KEYS.VOTED_MAP);
-                    } catch {
-                      // Ignore
-                    }
-                    setGasStatus({
-                      type: 'info',
-                      text: 'รีเซ็ตข้อมูลบนเครื่องกลับเป็นค่าเริ่มต้น (1 กระทงตัวอย่าง) แล้ว',
-                    });
-                    showToast('ล้างข้อมูลเหลือ 1 กระทงตัวอย่างแล้ว');
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-[11px] text-slate-200 cursor-pointer"
-                >
-                  รีเซ็ตข้อมูลเหลือ 1 กระทงตัวอย่าง
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isSyncingGas || !gasInputUrl.trim()}
+                    onClick={async () => {
+                      const target = gasInputUrl.trim();
+                      if (!target) return;
+                      setIsSyncingGas(true);
+                      setGasStatus({
+                        type: 'info',
+                        text: 'กำลังทดสอบเขียนข้อมูลตัวอย่างลง Google Sheet...',
+                      });
+                      const sample = createSeedKrathongs()[0];
+                      const testItem: KrathongItem = {
+                        ...sample,
+                        id: `test-${Date.now()}`,
+                        name: 'ทดสอบเชื่อมต่อ Google Sheet',
+                        wish: 'ทดสอบบันทึกข้อมูลจากเว็บลอยกระทง 2569',
+                        createdAt: new Date().toISOString(),
+                      };
+                      const res = await postToGas(target, {
+                        action: 'create',
+                        krathong: testItem,
+                      });
+                      setIsSyncingGas(false);
+                      if (res.ok && !res.opaque) {
+                        setGasStatus({
+                          type: 'success',
+                          text: 'ทดสอบบันทึกข้อมูล (POST) ลง Google Sheet สำเร็จ! สามารถเปิดดูแถวใหม่ในชีต "Krathongs" ได้เลย',
+                        });
+                        showToast('ทดสอบบันทึกข้อมูลลง Google Sheet สำเร็จ');
+                      } else if (res.ok && res.opaque) {
+                        setGasStatus({
+                          type: 'info',
+                          text: 'ส่งคำขอแบบ no-cors แล้ว กรุณาเปิดตรวจใน Google Sheet แท็บ "Krathongs" ว่ามีแถวใหม่เข้าหรือไม่',
+                        });
+                      } else {
+                        setGasStatus({
+                          type: 'error',
+                          text: `บันทึกไม่สำเร็จ: ${res.error}`,
+                        });
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 disabled:opacity-45 border border-emerald-400/35 text-[11px] text-emerald-200 cursor-pointer"
+                  >
+                    ทดสอบบันทึกลง Sheet
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const fresh = createSeedKrathongs();
+                      setKrathongs(fresh);
+                      setVotedMap({});
+                      try {
+                        localStorage.setItem(STORAGE_KEYS.KRATHONGS, JSON.stringify(fresh));
+                        localStorage.removeItem(STORAGE_KEYS.VOTED_MAP);
+                      } catch {
+                        // Ignore
+                      }
+                      setGasStatus({
+                        type: 'info',
+                        text: 'รีเซ็ตข้อมูลบนเครื่องกลับเป็นค่าเริ่มต้น (1 กระทงตัวอย่าง) แล้ว',
+                      });
+                      showToast('ล้างข้อมูลเหลือ 1 กระทงตัวอย่างแล้ว');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 border border-white/15 text-[11px] text-slate-200 cursor-pointer"
+                  >
+                    รีเซ็ตข้อมูลเหลือ 1 กระทงตัวอย่าง
+                  </button>
+                </div>
               </div>
             </div>
 
