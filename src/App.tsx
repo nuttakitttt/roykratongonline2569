@@ -2153,12 +2153,12 @@ export default function App() {
   // ============================================================================
 
   return (
-    <div className="relative min-h-screen w-full overflow-hidden bg-[#071026] text-slate-100 flex flex-col justify-between select-none">
+    <div className="relative h-[100dvh] w-full overflow-hidden bg-[#071026] text-slate-100 select-none">
       {/* =====================================================================
-          UPPER SKY BACKGROUND (48% height on desktop, responsive on mobile)
+          UPPER SKY BACKGROUND (46% dynamic viewport height)
          ===================================================================== */}
       <div
-        className="absolute inset-x-0 top-0 h-[48vh] sm:h-[46vh] transition-all duration-1000"
+        className="absolute inset-x-0 top-0 h-[46dvh] sm:h-[45dvh] transition-all duration-1000"
         style={{ background: skyPalette.skyGrad }}
       >
         {/* Twinkling Starfield */}
@@ -2237,10 +2237,10 @@ export default function App() {
       </div>
 
       {/* =====================================================================
-          ANIMATED RIVER WATER LAYER (52% height)
+          ANIMATED RIVER WATER LAYER (54% dynamic viewport height)
          ===================================================================== */}
       <div
-        className="absolute inset-x-0 bottom-0 h-[52vh] sm:h-[54vh] transition-all duration-1000 overflow-hidden"
+        className="absolute inset-x-0 bottom-0 h-[54dvh] sm:h-[55dvh] transition-all duration-1000 overflow-hidden"
         style={{ background: skyPalette.waterGrad }}
       >
         <FlowingWaterCanvas moonLeftPct={80} />
@@ -2389,7 +2389,7 @@ export default function App() {
             </button>
 
             {howToOpen && (
-              <div className="mt-2 p-4 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-white/15 text-xs sm:text-[13px] text-slate-200 leading-relaxed space-y-2 shadow-2xl max-w-md">
+              <div className="mt-2 p-4 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-white/15 text-xs sm:text-[13px] text-slate-200 leading-relaxed space-y-2 shadow-2xl max-w-md max-h-[38dvh] overflow-y-auto">
                 <p className="font-medium text-amber-200">
                   วันลอยกระทง 2569 (ลอยกระทง 69 · ค.ศ. 2026 หรือปี 26) ตรงกับวันอังคารที่ 24
                   พฤศจิกายน 2569 ร่วมลอยกระทงออนไลน์ 69 กับ วิทยาลัยการอาชีพเวียงเชียงรุ้ง ได้จาก
@@ -2503,10 +2503,14 @@ export default function App() {
       </header>
 
       {/* =====================================================================
-          BOTTOM FLOATING DOCK (ประกวด | วาดกระทง | ของฉัน)
+          BOTTOM FLOATING DOCK (Fixed at bottom for all screen & iPad orientations)
          ===================================================================== */}
-      <footer className="relative z-30 pb-5 sm:pb-6 px-4 flex flex-col items-center gap-2 pointer-events-none">
-        <div className="pointer-events-auto inline-flex items-center gap-1.5 sm:gap-2 p-1.5 rounded-full bg-slate-950/80 border border-white/15 backdrop-blur-xl shadow-[0_12px_36px_rgba(0,0,0,0.65)]">
+      <nav
+        aria-label="เมนูหลัก"
+        className="fixed inset-x-0 z-40 flex justify-center px-3 pointer-events-none"
+        style={{ bottom: 'max(0.85rem, env(safe-area-inset-bottom))' }}
+      >
+        <div className="pointer-events-auto inline-flex items-center gap-1 sm:gap-2 p-1.5 rounded-full bg-slate-950/85 border border-white/15 backdrop-blur-xl shadow-[0_12px_36px_rgba(0,0,0,0.65)] max-w-full">
           <button
             type="button"
             onClick={() => setActiveModal('contest')}
@@ -2534,7 +2538,7 @@ export default function App() {
             <span>ของฉัน</span>
           </button>
         </div>
-      </footer>
+      </nav>
 
       {/* =====================================================================
           TOAST FEEDBACK BANNER (Always rendered above modals)
