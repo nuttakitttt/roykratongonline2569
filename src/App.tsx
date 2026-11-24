@@ -2186,7 +2186,7 @@ export default function App() {
 
         {/* Full Moon with atmospheric halo & craters */}
         <div
-          className="absolute right-[10%] sm:right-[18%] transition-all duration-1000 pointer-events-none"
+          className="absolute right-[28%] sm:right-[22%] transition-all duration-1000 pointer-events-none"
           style={{ top: `${skyPalette.moonTopPct}%`, opacity: skyPalette.moonOpacity }}
         >
           <div className="relative w-20 h-20 sm:w-28 sm:h-28 rounded-full bg-[#FEF6D3] shadow-[0_0_65px_24px_rgba(253,230,138,0.28)]">
@@ -2243,7 +2243,7 @@ export default function App() {
         className="absolute inset-x-0 bottom-0 h-[54dvh] sm:h-[55dvh] transition-all duration-1000 overflow-hidden"
         style={{ background: skyPalette.waterGrad }}
       >
-        <FlowingWaterCanvas moonLeftPct={80} />
+        <FlowingWaterCanvas moonLeftPct={76} />
 
         {/* Subtle surface shimmer reflection under shoreline */}
         <div className="absolute inset-x-0 top-0 h-8 bg-gradient-to-b from-[#071226]/90 to-transparent pointer-events-none" />
@@ -2455,19 +2455,29 @@ export default function App() {
 
         {/* Right Top Controls */}
         <div className="flex flex-col items-end gap-2 pointer-events-auto shrink-0">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleShareInvite}
-              className="px-3.5 py-2 rounded-full bg-slate-900/65 hover:bg-slate-900/90 border border-white/20 text-xs sm:text-sm font-medium text-white backdrop-blur-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
-            >
-              <Share2 className="w-3.5 h-3.5 text-amber-300" />
-              <span>ชวนเพื่อนมาลอย</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={handleShareInvite}
+            className="px-3.5 py-2 rounded-full bg-slate-900/65 hover:bg-slate-900/90 border border-white/20 text-xs sm:text-sm font-medium text-white backdrop-blur-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+          >
+            <Share2 className="w-3.5 h-3.5 text-amber-300" />
+            <span>ชวนเพื่อนมาลอย</span>
+          </button>
 
-          {/* Interactive Sky Time Lighting & Lantern Launcher */}
-          <div className="flex items-center gap-1.5 bg-slate-950/60 border border-white/15 rounded-full p-1 backdrop-blur-md">
+          <button
+            type="button"
+            onClick={handleReleaseExtraLantern}
+            className="px-3 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/30 text-[11.5px] text-amber-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-300" />
+            <span>ปล่อยโคมลอย</span>
+          </button>
+
+          {/* Interactive Sky Time Lighting Column directly below ปล่อยโคมลอย */}
+          <div
+            aria-label="เลือกช่วงเวลาท้องฟ้า"
+            className="flex flex-col items-stretch gap-1 bg-slate-950/70 border border-white/15 rounded-2xl p-1.5 backdrop-blur-md shadow-[0_8px_24px_rgba(0,0,0,0.45)]"
+          >
             {(
               [
                 { id: 'realtime', label: 'เวลาจริง' },
@@ -2480,25 +2490,16 @@ export default function App() {
                 key={m.id}
                 type="button"
                 onClick={() => setSkyMode(m.id)}
-                className={`px-2.5 py-1 rounded-full text-[11px] transition-colors whitespace-nowrap cursor-pointer ${
+                className={`px-2.5 py-1.5 rounded-xl text-[11px] leading-tight text-center transition-colors whitespace-nowrap cursor-pointer ${
                   skyMode === m.id
-                    ? 'bg-amber-400 text-slate-950 font-semibold'
-                    : 'text-slate-300 hover:text-white'
+                    ? 'bg-amber-400 text-slate-950 font-semibold shadow-sm'
+                    : 'text-slate-200 hover:text-white hover:bg-white/10'
                 }`}
               >
                 {m.label}
               </button>
             ))}
           </div>
-
-          <button
-            type="button"
-            onClick={handleReleaseExtraLantern}
-            className="px-3 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/30 text-[11.5px] text-amber-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
-          >
-            <Flame className="w-3.5 h-3.5 text-amber-300" />
-            <span>ปล่อยโคมลอย</span>
-          </button>
         </div>
       </header>
 
