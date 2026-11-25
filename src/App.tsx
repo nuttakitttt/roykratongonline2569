@@ -21,6 +21,8 @@ import {
   Trash2,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 
@@ -83,6 +85,13 @@ interface SkyLantern {
 
 const COLLEGE_LOGO_URL =
   '/assets/aistudio/383967470_750445170429048_7326493794326681002_n_ddaffa8e.jpg';
+
+const LOY_KRATHONG_YOUTUBE_ID = '95s3Y8nVMV4';
+const LOCAL_AUDIO_CANDIDATES = [
+  '/assets/loykrathong.mp3',
+  '/assets/loykrathong.m4a',
+  '/assets/loykrathong.ogg',
+];
 
 const STORAGE_KEYS = {
   KRATHONGS: 'wice_loykrathong_2569_items_v2',
@@ -1581,6 +1590,85 @@ export default function App() {
     return () => clearTimeout(t);
   }, [toastMsg]);
 
+  // Background Festival Music States (Loop playback + Mute/Unmute toggle)
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [localAudioUrl, setLocalAudioUrl] = useState<string | null>(null);
+  const [ytMounted, setYtMounted] = useState(false);
+  const localAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ytIframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      for (const candidate of LOCAL_AUDIO_CANDIDATES) {
+        try {
+          const res = await fetch(candidate, { method: 'HEAD' });
+          const ct = (res.headers.get('content-type') || '').toLowerCase();
+          if (
+            res.ok &&
+            !ct.includes('text/html') &&
+            (ct.includes('audio/') || ct.includes('video/mp4') || ct.includes('application/octet-stream'))
+          ) {
+            if (!cancelled) setLocalAudioUrl(candidate);
+            return;
+          }
+        } catch {
+          // Try next path or fall back to YouTube embed
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const sendYtCommand = useCallback((func: string, args: unknown[] = []) => {
+    const win = ytIframeRef.current?.contentWindow;
+    if (!win) return;
+    win.postMessage(
+      JSON.stringify({
+        event: 'command',
+        func,
+        args,
+      }),
+      '*'
+    );
+  }, []);
+
+  const handleToggleMusic = useCallback(async () => {
+    const next = !isMusicPlaying;
+    if (localAudioUrl && localAudioRef.current) {
+      if (next) {
+        try {
+          localAudioRef.current.volume = 0.65;
+          await localAudioRef.current.play();
+          setIsMusicPlaying(true);
+        } catch {
+          showToast('ไม่สามารถเล่นไฟล์เสียงได้ กรุณาลองกดเปิดเสียงอีกครั้ง');
+        }
+      } else {
+        localAudioRef.current.pause();
+        setIsMusicPlaying(false);
+      }
+      return;
+    }
+
+    if (next) {
+      if (!ytMounted) {
+        setYtMounted(true);
+      } else {
+        sendYtCommand('unMute');
+        sendYtCommand('setVolume', [65]);
+        sendYtCommand('playVideo');
+      }
+      setIsMusicPlaying(true);
+    } else {
+      sendYtCommand('pauseVideo');
+      sendYtCommand('mute');
+      setIsMusicPlaying(false);
+    }
+  }, [isMusicPlaying, localAudioUrl, ytMounted, sendYtCommand, showToast]);
+
   // Real-time clock ticker every 30s
   useEffect(() => {
     const timer = setInterval(() => {
@@ -2593,6 +2681,25 @@ export default function App() {
 
           <button
             type="button"
+            onClick={handleToggleMusic}
+            aria-pressed={isMusicPlaying}
+            title={isMusicPlaying ? 'ปิดเสียงเพลงลอยกระทง' : 'เปิดเสียงเพลงวันลอยกระทง (เล่นวนลูป)'}
+            className={`px-3 py-1.5 rounded-full border text-xs font-medium backdrop-blur-md transition-colors inline-flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              isMusicPlaying
+                ? 'bg-amber-400/90 hover:bg-amber-300 border-amber-300 text-slate-950 font-semibold shadow-[0_0_16px_rgba(251,191,36,0.35)]'
+                : 'bg-slate-900/65 hover:bg-slate-900/90 border-white/20 text-white'
+            }`}
+          >
+            {isMusicPlaying ? (
+              <Volume2 className="w-3.5 h-3.5 shrink-0" />
+            ) : (
+              <VolumeX className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+            )}
+            <span>{isMusicPlaying ? 'ปิดเสียงเพลง' : 'เปิดเสียงเพลง'}</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleReleaseExtraLantern}
             className="px-3 py-1 rounded-full bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/30 text-[11.5px] text-amber-200 inline-flex items-center gap-1.5 cursor-pointer transition-colors"
           >
@@ -2667,6 +2774,29 @@ export default function App() {
           </button>
         </div>
       </nav>
+
+      {/* =====================================================================
+          LOOPING BACKGROUND FESTIVAL AUDIO (Local MP3 if present, else YouTube)
+         ===================================================================== */}
+      {localAudioUrl && (
+        <audio
+          ref={localAudioRef}
+          src={localAudioUrl}
+          loop
+          preload="auto"
+          playsInline
+          className="hidden"
+        />
+      )}
+      {!localAudioUrl && ytMounted && (
+        <iframe
+          ref={ytIframeRef}
+          title="เพลงรำวงลอยกระทง"
+          src={`https://www.youtube.com/embed/${LOY_KRATHONG_YOUTUBE_ID}?autoplay=1&loop=1&playlist=${LOY_KRATHONG_YOUTUBE_ID}&enablejsapi=1&playsinline=1&controls=0&rel=0`}
+          allow="autoplay; encrypted-media"
+          className="fixed bottom-0 right-0 w-[200px] h-[113px] opacity-[0.001] pointer-events-none -z-10"
+        />
+      )}
 
       {/* =====================================================================
           TOAST FEEDBACK BANNER (Always rendered above modals)
