@@ -929,21 +929,21 @@ const KrathongSignBadge: React.FC<{
 
   const nameSizeCls =
     nameSize === 'sm'
-      ? 'text-[12px]'
+      ? 'text-[10px]'
       : nameSize === 'lg'
-        ? 'text-[17px]'
+        ? 'text-[14px]'
         : nameSize === 'xl'
-          ? 'text-[19px]'
-          : 'text-[14.5px]';
+          ? 'text-[16px]'
+          : 'text-[12px]';
 
   const wishSizeCls =
     wishSize === 'sm'
-      ? 'text-[10.5px]'
+      ? 'text-[9px]'
       : wishSize === 'lg'
-        ? 'text-[13.5px]'
+        ? 'text-[11px]'
         : wishSize === 'xl'
-          ? 'text-[14.5px]'
-          : 'text-[11.5px]';
+          ? 'text-[12px]'
+          : 'text-[10px]';
 
   const displayName = name.trim() || 'ชื่อกระทง';
   const displayWish = wish.trim();
@@ -951,7 +951,7 @@ const KrathongSignBadge: React.FC<{
   if (styleType === 'floating') {
     return (
       <div
-        className={`text-center pointer-events-none select-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] ${compact ? 'max-w-[140px]' : 'max-w-[172px]'}`}
+        className={`text-center pointer-events-none select-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] ${compact ? 'max-w-[116px]' : 'max-w-[144px]'}`}
         style={{ color: colorHex === '#A46A3E' ? '#FFF8E7' : colorHex }}
       >
         <div className={`font-semibold leading-tight truncate ${nameSizeCls}`}>{displayName}</div>
@@ -966,19 +966,19 @@ const KrathongSignBadge: React.FC<{
 
   const shapeClass =
     styleType === 'heart'
-      ? 'rounded-2xl rounded-b-3xl px-3.5 py-1.5 border border-white/25'
+      ? 'rounded-2xl rounded-b-3xl px-3 py-1 border border-white/25'
       : styleType === 'flag'
-        ? 'rounded-r-lg rounded-tl-sm px-3 py-1 border-l-4 border-amber-300/80'
+        ? 'rounded-r-lg rounded-tl-sm px-2.5 py-0.5 border-l-4 border-amber-300/80'
         : styleType === 'scroll'
-          ? 'rounded-md px-3.5 py-1 border-x-4 border-amber-800/60'
+          ? 'rounded-md px-3 py-0.5 border-x-4 border-amber-800/60'
           : styleType === 'paper'
-            ? 'rounded-sm px-3 py-1 shadow-md'
-            : 'rounded-md px-3 py-1 border border-black/25 shadow-md';
+            ? 'rounded-sm px-2.5 py-0.5 shadow-md'
+            : 'rounded-md px-2.5 py-0.5 border border-black/25 shadow-md';
 
   return (
     <div className="flex flex-col items-center pointer-events-none select-none">
       <div
-        className={`${shapeClass} ${compact ? 'max-w-[140px]' : 'max-w-[172px]'} text-center`}
+        className={`${shapeClass} ${compact ? 'max-w-[116px]' : 'max-w-[144px]'} text-center`}
         style={{ backgroundColor: colorHex, color: textColor }}
       >
         <div className={`font-semibold leading-tight truncate ${nameSizeCls}`}>{displayName}</div>
@@ -989,7 +989,7 @@ const KrathongSignBadge: React.FC<{
         )}
       </div>
       {/* Wooden stick */}
-      <div className="w-[2.5px] h-3.5 bg-amber-900/90 rounded-b-sm" />
+      <div className="w-[2px] h-3 bg-amber-900/90 rounded-b-sm" />
     </div>
   );
 };
@@ -1829,7 +1829,7 @@ export default function App() {
         return { ...existing, item };
       }
       const lane = idx % 5; // 0 = farthest back, 4 = nearest front
-      const scale = 0.74 + lane * 0.13;
+      const scale = 0.62 + lane * 0.11;
       const speed = 1.65 + lane * 0.48 + (idx % 3) * 0.18;
       // Newly created item spawns near left entrance so user sees it float immediately!
       const isBrandNew = Date.now() - new Date(item.createdAt).getTime() < 8000;
@@ -2404,10 +2404,10 @@ export default function App() {
                   }
                 >
                   {/* Warm candle glow reflection on water */}
-                  <div className="absolute bottom-2 w-32 h-9 rounded-full bg-amber-400/20 blur-md group-hover:bg-amber-300/35 transition-colors pointer-events-none" />
+                  <div className="absolute bottom-2 w-24 h-7 rounded-full bg-amber-400/20 blur-md group-hover:bg-amber-300/35 transition-colors pointer-events-none" />
 
                   {/* Krathong Artwork + Sign */}
-                  <div className="relative w-38 h-38 sm:w-44 sm:h-44">
+                  <div className="relative w-32 h-32 sm:w-36 sm:h-36">
                     <img
                       src={fk.item.imageData}
                       alt={fk.item.name}
@@ -2431,17 +2431,17 @@ export default function App() {
                   </div>
 
                   {/* Subtle Water Reflection */}
-                  <div className="w-28 h-6 -mt-6 opacity-25 scale-y-[-0.45] blur-[1.5px] pointer-events-none overflow-hidden">
+                  <div className="w-24 h-5 -mt-5 opacity-25 scale-y-[-0.45] blur-[1.5px] pointer-events-none overflow-hidden">
                     <img
                       src={fk.item.imageData}
                       alt=""
                       aria-hidden="true"
-                      className="w-full h-28 object-contain"
+                      className="w-full h-24 object-contain"
                     />
                   </div>
 
                   {/* Owner label cleanly beneath */}
-                  <span className="mt-1 px-2.5 py-0.5 rounded bg-slate-950/65 text-[13px] font-medium text-amber-100/95 whitespace-nowrap max-w-[172px] truncate backdrop-blur-xs">
+                  <span className="mt-1 px-2 py-0.5 rounded bg-slate-950/65 text-[11px] font-medium text-amber-100/95 whitespace-nowrap max-w-[140px] truncate backdrop-blur-xs">
                     {fk.item.ownerName}
                   </span>
                 </div>
